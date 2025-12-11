@@ -1,25 +1,25 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>AGROD Drone Dashboard</title>
-  <style>
-    body{font-family:Arial, sans-serif;padding:18px;background:#fff}
-    #preview{border:2px solid #222; width:640px; height:360px; display:block; object-fit:contain; background:#f7f7f7}
-    #result{margin-top:10px; padding:8px; background:#efefef; width:640px}
-    button{padding:8px 14px;margin:6px}
-  </style>
+    <meta charset="utf-8">
+    <title>AGROD Drone Dashboard</title>
+    <style>
+        body{font-family:Arial, sans-serif;padding:18px;background:#fff}
+        #preview{border:2px solid #222; width:640px; height:360px; display:block; object-fit:contain; background:#f7f7f7}
+        #captured{border:1px solid #ccc; width:640px; height:360px; object-fit:contain; display:block; margin-bottom:12px}
+        #result{margin-top:10px; padding:8px; background:#efefef; width:640px}
+        button{padding:8px 14px;margin:6px}
+    </style>
 </head>
 <body>
   <h1>AGROD Drone Dashboard</h1>
   <p><b>PI ID:</b> {{ pi_id }}</p>
 
   <h2>Captured (latest)</h2>
-  <img id="captured" src="/last_image/{{ pi_id }}" width="640" height="360" style="border:1px solid #ccc; display:block;">
+  <img id="captured" src="/last_image/{{ pi_id }}" alt="captured image">
 
   <h2>Near-live preview</h2>
-  <!-- this image will be updated rapidly to mimic livestream -->
-  <img id="preview" src="/last_image/{{ pi_id }}" alt="preview">
+  <img id="preview" src="/last_image/{{ pi_id }}" alt="near-live preview">
 
   <div id="result">
     {% if last_result %}
@@ -35,54 +35,109 @@
   <button onclick="sendCommand('CAPTURE')">Capture Image</button>
 
 <script>
+/* --------- Config from server template --------- */
 const PI_ID = "{{ pi_id }}";
-const REFRESH_MS = {{ refresh_interval }}; // ms, set by app.py (250 default)
+const REFRESH_MS = {{ refresh_interval }}; // ms (set by app.py); default 250-700
+/* ---------------------------------------------- */
 
-// send command to Pi (server will store it for Pi to poll)
+const previewEl = document.getElementById("preview");
+const capturedEl = document.getElementById("captured");
+const resultEl = document.getElementById("result");
+
+// track last known headers to detect change
+let lastContentLength = null;
+let lastModified = null;
+let lastUpdateDisplay = null;
+
 function sendCommand(cmd){
   fetch("/api/set_command", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({pi_id:PI_ID, command:cmd})
-  });
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({pi_id: PI_ID, command: cmd})
+  }).catch(e => console.warn("sendCommand error", e));
 }
 
-// reload captured image (manual refresh - used after upload)
-function reloadCaptured(){
-  document.getElementById("captured").src = `/last_image/${PI_ID}?ts=`+Date.now();
+// perform a HEAD request to inspect headers without downloading body
+async function headLastImage() {
+  try {
+    const url = `/last_image/${PI_ID}`;
+    const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    if (!r.ok) return null;
+    return {
+      length: r.headers.get('Content-Length'),
+      modified: r.headers.get('Last-Modified'),
+      date: r.headers.get('Date'),
+      contentType: r.headers.get('Content-Type')
+    };
+  } catch (e) {
+    console.warn("HEAD failed:", e);
+    return null;
+  }
 }
 
-// near-live preview: preload image, swap when fully loaded
-function refreshPreview(){
-  const url = `/last_image/${PI_ID}?ts=` + Date.now();
+// Preload image and swap only when loaded
+function preloadAndSwap(url) {
   const img = new Image();
-  img.onload = function(){ document.getElementById("preview").src = url; };
-  img.onerror = function(){ /* ignore errors, keep previous frame */ };
+  img.onload = () => {
+    previewEl.src = url;
+    // update the static captured view too
+    capturedEl.src = url;
+  };
+  img.onerror = () => {
+    console.warn("preview load error for", url);
+  };
   img.src = url;
 }
 
-// also refresh analysis result
-function refreshResult(){
+// refresh both headers and result
+async function refreshLoop() {
+  // 1) update result text (non-blocking)
   fetch(`/api/last_result?pi_id=${PI_ID}`)
-    .then(r=>r.json())
-    .then(j=>{
-      if (j.result){
-        document.getElementById("result").innerText =
-          `Crop: ${j.result.crop_type} | Status: ${j.result.status} | Confidence: ${j.result.confidence}`;
+    .then(r => r.json())
+    .then(j => {
+      if (j.result) {
+        resultEl.innerText = `Crop: ${j.result.crop_type} | Status: ${j.result.status} | Confidence: ${j.result.confidence}`;
       }
-    }).catch(()=>{});
+    })
+    .catch(()=>{});
+
+  // 2) check HEAD to know if last_image changed
+  const h = await headLastImage();
+  if (!h) return;
+
+  // If server returns tiny placeholder it may be image/png with tiny length; ignore placeholder
+  if (h.contentType && h.contentType.includes('image/png') && Number(h.length) < 200) {
+    // placeholder present — do nothing yet
+    return;
+  }
+
+  // If first time or headers changed, fetch new image
+  const changed = (lastContentLength !== h.length) || (lastModified !== h.modified);
+  if (changed) {
+    lastContentLength = h.length;
+    lastModified = h.modified;
+    const imgUrl = `/last_image/${PI_ID}?ts=` + Date.now();
+    preloadAndSwap(imgUrl);
+
+    // show last update info on page
+    const when = h.modified || h.date || new Date().toString();
+    if (!lastUpdateDisplay) {
+      lastUpdateDisplay = document.createElement('div');
+      lastUpdateDisplay.style.marginTop = '6px';
+      lastUpdateDisplay.style.fontSize = '13px';
+      previewEl.parentNode.insertBefore(lastUpdateDisplay, previewEl.nextSibling);
+    }
+    lastUpdateDisplay.innerText = "Last image update: " + when;
+    console.log("Preview updated:", when, "len=", h.length, "type=", h.contentType);
+  }
 }
 
-// combined loop
-setInterval(()=>{
-  refreshPreview();
-  refreshResult();
-}, REFRESH_MS);
-
-// optional: also reload the captured static display every few seconds so user-seen image updates
-setInterval(reloadCaptured, REFRESH_MS*4); // slower than preview
-
+// run loop
+setInterval(refreshLoop, REFRESH_MS);
+// immediate initial run
+refreshLoop();
 </script>
+
 </body>
 </html>
 
