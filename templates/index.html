@@ -4,96 +4,72 @@
   <meta charset="utf-8">
   <title>AGROD CONTROL</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; }
-    button { margin: 6px; padding: 8px 12px; }
-    .status { margin-top: 12px; }
-    .stream { margin-top: 12px; border: 1px solid #ddd; display:inline-block; }
+    body { font-family: Arial, sans-serif; padding: 16px; }
+    #live { border: 1px solid #ddd; display:block; margin-bottom:10px; }
+    #controls { margin-bottom:12px; }
+    #result { margin-top:10px; font-weight:600; }
   </style>
 </head>
 <body>
-  <h1>AGROD Dashboard</h1>
+  <h1>AGROD Drone Dashboard</h1>
 
-  <div>
-    <strong>Device:</strong> <span id="pi_id">{{ pi_id }}</span>
-  </div>
-
-  <div class="status">
-    <strong>Command:</strong> <span id="cmd">{{ command }}</span>
-  </div>
-
-  <div style="margin-top:8px;">
+  <div id="controls">
     <button onclick="sendCommand('PUMP_ON')">Pump ON</button>
     <button onclick="sendCommand('PUMP_OFF')">Pump OFF</button>
     <button onclick="sendCommand('CAPTURE')">Capture Image</button>
+    &nbsp; Current command: <span id="cmd">{{ command }}</span>
   </div>
 
-  <h2>Live Stream (MJPEG from last upload)</h2>
-  <div class="stream">
-    <img id="live_stream" src="/mjpeg_stream/{{ pi_id }}" width="640" height="480" alt="Live stream">
-  </div>
+  <h3>Live Preview</h3>
+  <!-- Image will be refreshed frequently to mimic video -->
+  <img id="live" src="/last_image/{{ pi_id }}?ts=0" width="640" height="360" alt="No image yet">
 
-  <h2>Last Analysis</h2>
-  <div id="result_area">
+  <div id="result">
     {% if last_result %}
-      <div>Crop: <span id="crop">{{ last_result.crop_type }}</span></div>
-      <div>Status: <span id="status">{{ last_result.status }}</span></div>
-      <div>Confidence: <span id="conf">{{ last_result.confidence }}</span></div>
+      Crop: {{ last_result.crop_type }} | Status: {{ last_result.status }} | Conf: {{ last_result.confidence }}
     {% else %}
-      <div id="no_data">No data yet</div>
+      No data yet
     {% endif %}
   </div>
 
 <script>
 const PI_ID = "{{ pi_id }}";
+let refreshing = true;
+const REFRESH_MS = 500; // change to 250 for faster update, higher CPU/bandwidth
 
-function sendCommand(command) {
-  fetch("/api/set_command", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({pi_id: PI_ID, command: command})
-  }).then(()=> {
-    // show immediately
-    document.getElementById("cmd").innerText = command;
-  }).catch(e=>console.error(e));
+async function sendCommand(cmd){
+  await fetch("/api/set_command", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({pi_id:PI_ID, command:cmd})
+  });
+  document.getElementById("cmd").innerText = cmd;
 }
 
-async function pollCommand() {
+async function refreshResultAndImage(){
+  // fetch last result
   try {
-    const res = await fetch("/api/command?pi_id="+PI_ID);
-    const j = await res.json();
-    document.getElementById("cmd").innerText = j.command || "IDLE";
-  } catch(e) {
-    console.error("command poll failed", e);
-  }
-}
-
-async function pollResult() {
-  try {
-    const res = await fetch("/api/last_result?pi_id="+PI_ID);
-    const j = await res.json();
-    const r = j.result;
-    if (r) {
-      document.getElementById("no_data")?.remove();
-      document.getElementById("crop").innerText = r.crop_type || "N/A";
-      document.getElementById("status").innerText = r.status || "N/A";
-      document.getElementById("conf").innerText = r.confidence ?? "N/A";
-      // also refresh the static last_image (in case mjpeg doesn't update instantly)
-      const img = document.getElementById("live_stream");
-      img.src = "/mjpeg_stream/" + PI_ID + "?ts=" + Date.now();
+    const r = await fetch(`/api/last_result?pi_id=${PI_ID}`);
+    const j = await r.json();
+    const res = j.result;
+    const resultDiv = document.getElementById("result");
+    if (res) {
+      resultDiv.innerText = `Crop: ${res.crop_type} | Status: ${res.status} | Conf: ${Number(res.confidence).toFixed(2)}`;
     }
-  } catch(e) {
+  } catch(e){
     // ignore
   }
+
+  // refresh image by changing query string to bust cache
+  const img = document.getElementById("live");
+  img.src = `/last_image/${PI_ID}?ts=${Date.now()}`;
 }
 
-// Poll frequently for a responsive UI
-setInterval(pollCommand, 2000);   // every 2s
-setInterval(pollResult, 2000);    // every 2s
+setInterval(() => {
+  if (refreshing) refreshResultAndImage();
+}, REFRESH_MS);
 
-// initial fetch
-pollCommand();
-pollResult();
 </script>
-
 </body>
 </html>
+

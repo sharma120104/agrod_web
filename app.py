@@ -1,42 +1,30 @@
-from flask import Flask, request, render_template, jsonify, send_from_directory, Response
-import os
-import threading
-import time
+from flask import Flask, request, render_template, jsonify, send_from_directory
 from io import BytesIO
 from PIL import Image
+import threading
+import os
 
 app = Flask(__name__)
 
-# ----------------------------
-# Configuration / Globals
-# ----------------------------
+# --- Config ---
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-commands = {}       # maps pi_id -> command (e.g., "PUMP_ON", "CAPTURE", "IDLE")
-last_results = {}   # maps pi_id -> analysis result dict
+commands = {}
+last_results = {}
+
+MODEL = None
 model_lock = threading.Lock()
 
-# ----------------------------
-# Placeholder ML inference
-# ----------------------------
 def analyze_image(image_bytes):
-    """
-    Replace this function with real ML model inference.
-    image_bytes: raw bytes of the uploaded image.
-    Must return a dict serializable to JSON, for example:
-      {"crop_type":"cotton","status":"diseased","confidence":0.93}
-    """
-    # Temporary dummy output:
+    # TODO: replace with your real model inference
+    # For now return dummy result
     return {
         "crop_type": "unknown",
         "status": "not trained yet",
         "confidence": 0.0
     }
 
-# ----------------------------
-# Web routes
-# ----------------------------
 @app.route("/")
 def index():
     pi_id = request.args.get("pi_id", "AGROD1")
@@ -47,7 +35,7 @@ def index():
 
 @app.route("/api/set_command", methods=["POST"])
 def set_command():
-    data = request.get_json(force=True)
+    data = request.get_json()
     pi_id = data.get("pi_id", "AGROD1")
     command = data.get("command", "IDLE")
     commands[pi_id] = command
@@ -58,85 +46,46 @@ def get_command():
     pi_id = request.args.get("pi_id", "AGROD1")
     return jsonify({"command": commands.get(pi_id, "IDLE")})
 
-@app.route("/api/last_result")
-def api_last_result():
-    pi_id = request.args.get("pi_id", "AGROD1")
-    return jsonify({"pi_id": pi_id, "result": last_results.get(pi_id)})
-
 @app.route("/api/upload", methods=["POST"])
 def upload():
-    """
-    Endpoint for Pi to POST images:
-    - form field: pi_id
-    - file field: image
-    Saves the image to uploads/<pi_id>_last.jpg and runs analyze_image().
-    """
     pi_id = request.form.get("pi_id", "AGROD1")
-    image = request.files.get("image")
-    if not image:
-        return jsonify({"ok": False, "error": "no image provided"}), 400
+    file = request.files.get("image")
+    if not file:
+        return jsonify({"ok": False, "error": "No image"}), 400
 
+    # Save latest image for this pi
     filename = f"{pi_id}_last.jpg"
-    path = os.path.join(UPLOAD_DIR, filename)
-    try:
-        image.save(path)
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"save failed: {e}"}), 500
+    save_path = os.path.join(UPLOAD_DIR, filename)
+    file.save(save_path)
 
-    # Run analysis (thread-safe)
+    # Run analyze (reads saved bytes)
+    with open(save_path, "rb") as f:
+        image_bytes = f.read()
     with model_lock:
-        try:
-            with open(path, "rb") as f:
-                image_bytes = f.read()
-            result = analyze_image(image_bytes)
-        except Exception as e:
-            result = {"error": f"analysis failed: {e}"}
+        result = analyze_image(image_bytes)
 
     last_results[pi_id] = result
     commands[pi_id] = "IDLE"
-    return jsonify({"ok": True, "result": result})
 
-# Serve the last saved image for direct download/view
+    return jsonify({"ok": True, "pi_id": pi_id, "result": result})
+
+@app.route("/api/last_result")
+def last_result():
+    pi_id = request.args.get("pi_id", "AGROD1")
+    return jsonify({"pi_id": pi_id, "result": last_results.get(pi_id)})
+
 @app.route("/last_image/<pi_id>")
 def last_image(pi_id):
     filename = f"{pi_id}_last.jpg"
     path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(path):
+        # optional placeholder 1x1 transparent gif or return 404
         return ("", 404)
-    return send_from_directory(UPLOAD_DIR, filename)
+    # serve without caching (so client always gets latest)
+    response = send_from_directory(UPLOAD_DIR, filename)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
-# ----------------------------
-# MJPEG stream built from saved file
-# ----------------------------
-def mjpeg_generator(pi_id="AGROD1", fps=2):
-    boundary = b"--frame\r\n"
-    header = b"Content-Type: image/jpeg\r\n\r\n"
-    filename = f"{pi_id}_last.jpg"
-    path = os.path.join(UPLOAD_DIR, filename)
-    delay = 1.0 / max(1, fps)
-
-    while True:
-        if os.path.exists(path):
-            try:
-                with open(path, "rb") as f:
-                    frame = f.read()
-                yield boundary + header + frame + b"\r\n"
-            except Exception:
-                # read error; skip
-                pass
-        else:
-            # no image yet; yield a short pause
-            pass
-        time.sleep(delay)
-
-@app.route("/mjpeg_stream/<pi_id>")
-def mjpeg_stream(pi_id="AGROD1"):
-    return Response(mjpeg_generator(pi_id=pi_id, fps=2),
-                    mimetype="multipart/x-mixed-replace; boundary=frame")
-
-# ----------------------------
-# Run (for local debugging)
-# ----------------------------
 if __name__ == "__main__":
-    # Port 5000 is what Render expects for local testing; in production use gunicorn app:app
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=False)
+
