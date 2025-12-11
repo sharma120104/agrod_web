@@ -1,75 +1,94 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>AGROD CONTROL</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 16px; }
-    #live { border: 1px solid #ddd; display:block; margin-bottom:10px; }
-    #controls { margin-bottom:12px; }
-    #result { margin-top:10px; font-weight:600; }
-  </style>
+    <title>AGROD CONTROL</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #fafafa;
+        }
+        img {
+            border: 2px solid #333;
+            width: 600px;
+            height: auto;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        #result {
+            font-size: 18px;
+            margin-top: 15px;
+            padding: 10px;
+            background: #eee;
+            width: 600px;
+        }
+    </style>
 </head>
+
 <body>
-  <h1>AGROD Drone Dashboard</h1>
 
-  <div id="controls">
-    <button onclick="sendCommand('PUMP_ON')">Pump ON</button>
-    <button onclick="sendCommand('PUMP_OFF')">Pump OFF</button>
-    <button onclick="sendCommand('CAPTURE')">Capture Image</button>
-    &nbsp; Current command: <span id="cmd">{{ command }}</span>
-  </div>
+<h1>AGROD Drone Dashboard</h1>
+<p><b>PI ID:</b> {{ pi_id }}</p>
 
-  <h3>Live Preview</h3>
-  <!-- Image will be refreshed frequently to mimic video -->
-  <img id="live" src="/last_image/{{ pi_id }}?ts=0" width="640" height="360" alt="No image yet">
+<h2>Live Preview</h2>
+<img id="live" src="/last_image/{{ pi_id }}">
 
-  <div id="result">
+<div id="result">
     {% if last_result %}
-      Crop: {{ last_result.crop_type }} | Status: {{ last_result.status }} | Conf: {{ last_result.confidence }}
+        Crop: {{ last_result.crop_type }} |
+        Status: {{ last_result.status }} |
+        Confidence: {{ last_result.confidence }}
     {% else %}
-      No data yet
+        No data yet
     {% endif %}
-  </div>
+</div>
+
+<h2>Controls</h2>
+<button onclick="sendCommand('PUMP_ON')">Pump ON</button>
+<button onclick="sendCommand('PUMP_OFF')">Pump OFF</button>
+<button onclick="sendCommand('CAPTURE')">Capture Image</button>
 
 <script>
-const PI_ID = "{{ pi_id }}";
-let refreshing = true;
-const REFRESH_MS = 500; // change to 250 for faster update, higher CPU/bandwidth
+    const PI_ID = "{{ pi_id }}";
+    const REFRESH_MS = {{ refresh_interval }};
 
-async function sendCommand(cmd){
-  await fetch("/api/set_command", {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({pi_id:PI_ID, command:cmd})
-  });
-  document.getElementById("cmd").innerText = cmd;
-}
-
-async function refreshResultAndImage(){
-  // fetch last result
-  try {
-    const r = await fetch(`/api/last_result?pi_id=${PI_ID}`);
-    const j = await r.json();
-    const res = j.result;
-    const resultDiv = document.getElementById("result");
-    if (res) {
-      resultDiv.innerText = `Crop: ${res.crop_type} | Status: ${res.status} | Conf: ${Number(res.confidence).toFixed(2)}`;
+    function sendCommand(cmd) {
+        fetch("/api/set_command", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pi_id: PI_ID, command: cmd })
+        });
     }
-  } catch(e){
-    // ignore
-  }
 
-  // refresh image by changing query string to bust cache
-  const img = document.getElementById("live");
-  img.src = `/last_image/${PI_ID}?ts=${Date.now()}`;
-}
+    function refreshImage() {
+        const url = `/last_image/${PI_ID}?ts=` + Date.now();
+        const img = new Image();
+        img.onload = () => {
+            document.getElementById("live").src = url;
+        };
+    }
 
-setInterval(() => {
-  if (refreshing) refreshResultAndImage();
-}, REFRESH_MS);
+    function refreshResult() {
+        fetch(`/api/last_result?pi_id=${PI_ID}`)
+            .then(r => r.json())
+            .then(j => {
+                if (j.result) {
+                    document.getElementById("result").innerText =
+                        `Crop: ${j.result.crop_type} | Status: ${j.result.status} | Confidence: ${j.result.confidence}`;
+                }
+            });
+    }
 
+    setInterval(() => {
+        refreshImage();
+        refreshResult();
+    }, REFRESH_MS);
 </script>
+
 </body>
 </html>
 
