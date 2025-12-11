@@ -1,42 +1,99 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AGROD CONTROL</title>
-    <meta charset="utf-8">
-    <script>
-        const PI_ID = "AGROD1";
-
-        function sendCommand(cmd){
-            fetch("/api/set_command", {
-                method:"POST",
-                headers:{"Content-Type":"application/json"},
-                body: JSON.stringify({pi_id:PI_ID, command:cmd})
-            });
-        }
-    </script>
+  <meta charset="utf-8">
+  <title>AGROD CONTROL</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; }
+    button { margin: 6px; padding: 8px 12px; }
+    .status { margin-top: 12px; }
+    .stream { margin-top: 12px; border: 1px solid #ddd; display:inline-block; }
+  </style>
 </head>
 <body>
-    <h1>AGROD Drone Dashboard</h1>
+  <h1>AGROD Dashboard</h1>
 
-    <p>Command: <b>{{command}}</b></p>
+  <div>
+    <strong>Device:</strong> <span id="pi_id">{{ pi_id }}</span>
+  </div>
 
+  <div class="status">
+    <strong>Command:</strong> <span id="cmd">{{ command }}</span>
+  </div>
+
+  <div style="margin-top:8px;">
     <button onclick="sendCommand('PUMP_ON')">Pump ON</button>
     <button onclick="sendCommand('PUMP_OFF')">Pump OFF</button>
     <button onclick="sendCommand('CAPTURE')">Capture Image</button>
+  </div>
 
-    <h2>Last Result</h2>
+  <h2>Live Stream (MJPEG from last upload)</h2>
+  <div class="stream">
+    <img id="live_stream" src="/mjpeg_stream/{{ pi_id }}" width="640" height="480" alt="Live stream">
+  </div>
 
+  <h2>Last Analysis</h2>
+  <div id="result_area">
     {% if last_result %}
-        Crop: {{ last_result.crop_type }} <br>
-        Status: {{ last_result.status }} <br>
-        Confidence: {{ last_result.confidence }}
+      <div>Crop: <span id="crop">{{ last_result.crop_type }}</span></div>
+      <div>Status: <span id="status">{{ last_result.status }}</span></div>
+      <div>Confidence: <span id="conf">{{ last_result.confidence }}</span></div>
     {% else %}
-        No data yet
+      <div id="no_data">No data yet</div>
     {% endif %}
-    <h2>Live (MJPEG)</h2>
-<!-- use the Render-hosted MJPEG proxy endpoint -->
-<img id="live_stream" src="/mjpeg_stream/AGROD1" width="640" height="480" alt="Live stream"/>
+  </div>
+
+<script>
+const PI_ID = "{{ pi_id }}";
+
+function sendCommand(command) {
+  fetch("/api/set_command", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({pi_id: PI_ID, command: command})
+  }).then(()=> {
+    // show immediately
+    document.getElementById("cmd").innerText = command;
+  }).catch(e=>console.error(e));
+}
+
+async function pollCommand() {
+  try {
+    const res = await fetch("/api/command?pi_id="+PI_ID);
+    const j = await res.json();
+    document.getElementById("cmd").innerText = j.command || "IDLE";
+  } catch(e) {
+    console.error("command poll failed", e);
+  }
+}
+
+async function pollResult() {
+  try {
+    const res = await fetch("/api/last_result?pi_id="+PI_ID);
+    const j = await res.json();
+    const r = j.result;
+    if (r) {
+      document.getElementById("no_data")?.remove();
+      document.getElementById("crop").innerText = r.crop_type || "N/A";
+      document.getElementById("status").innerText = r.status || "N/A";
+      document.getElementById("conf").innerText = r.confidence ?? "N/A";
+      // also refresh the static last_image (in case mjpeg doesn't update instantly)
+      const img = document.getElementById("live_stream");
+      img.src = "/mjpeg_stream/" + PI_ID + "?ts=" + Date.now();
+    }
+  } catch(e) {
+    // ignore
+  }
+}
+
+// Poll frequently for a responsive UI
+setInterval(pollCommand, 2000);   // every 2s
+setInterval(pollResult, 2000);    // every 2s
+
+// initial fetch
+pollCommand();
+pollResult();
+</script>
 
 </body>
 </html>
-
