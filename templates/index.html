@@ -1,17 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>AGROD CONTROL</title>
+  <meta charset="utf-8" />
+  <title>AGROD Control</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 16px; }
-    #live { border: 1px solid #ddd; display:block; margin-bottom:10px; }
-    #controls { margin-bottom:12px; }
-    #result { margin-top:10px; font-weight:600; }
+    body{ font-family: Arial, sans-serif; margin:20px; background:#fafafa; }
+    #live{ border:2px solid #333; width:640px; height:auto; display:block; margin-bottom:10px; }
+    button{ padding:10px 16px; margin:6px; font-size:15px; }
+    #result{ font-size:16px; margin-top:12px; padding:10px; background:#eee; width:640px; }
+    #controls{ margin-bottom:12px; }
   </style>
 </head>
 <body>
+
   <h1>AGROD Drone Dashboard</h1>
+  <p><strong>PI ID:</strong> {{ pi_id }}</p>
 
   <div id="controls">
     <button onclick="sendCommand('PUMP_ON')">Pump ON</button>
@@ -20,56 +23,59 @@
     &nbsp; Current command: <span id="cmd">{{ command }}</span>
   </div>
 
-  <h3>Live Preview</h3>
-  <!-- Image will be refreshed frequently to mimic video -->
-  <img id="live" src="/last_image/{{ pi_id }}?ts=0" width="640" height="360" alt="No image yet">
+  <h2>Live Preview</h2>
+  <img id="live" src="/last_image/{{ pi_id }}" alt="Live preview">
 
   <div id="result">
     {% if last_result %}
-      Crop: {{ last_result.crop_type }} | Status: {{ last_result.status }} | Conf: {{ last_result.confidence }}
+      Crop: {{ last_result.crop_type }} | Status: {{ last_result.status }} | Confidence: {{ last_result.confidence }}
     {% else %}
       No data yet
     {% endif %}
   </div>
 
 <script>
-const PI_ID = "{{ pi_id }}";
-let refreshing = true;
-const REFRESH_MS = 500; // change to 250 for faster update, higher CPU/bandwidth
+  const PI_ID = "{{ pi_id }}";
+  const REFRESH_MS = {{ refresh_interval }};
 
-async function sendCommand(cmd){
-  await fetch("/api/set_command", {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({pi_id:PI_ID, command:cmd})
-  });
-  document.getElementById("cmd").innerText = cmd;
-}
-
-async function refreshResultAndImage(){
-  // fetch last result
-  try {
-    const r = await fetch(`/api/last_result?pi_id=${PI_ID}`);
-    const j = await r.json();
-    const res = j.result;
-    const resultDiv = document.getElementById("result");
-    if (res) {
-      resultDiv.innerText = `Crop: ${res.crop_type} | Status: ${res.status} | Conf: ${Number(res.confidence).toFixed(2)}`;
-    }
-  } catch(e){
-    // ignore
+  function sendCommand(cmd){
+    fetch("/api/set_command", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({pi_id: PI_ID, command: cmd})
+    }).catch(()=>{});
+    document.getElementById("cmd").innerText = cmd;
   }
 
-  // refresh image by changing query string to bust cache
-  const img = document.getElementById("live");
-  img.src = `/last_image/${PI_ID}?ts=${Date.now()}`;
-}
+  // Preload image then swap to avoid flicker
+  function refreshImage(){
+    const url = `/last_image/${PI_ID}?ts=${Date.now()}`;
+    const pre = new Image();
+    pre.onload = () => { document.getElementById('live').src = url; };
+    // onerror: keep old image silently
+    pre.onerror = () => {};
+    pre.src = url;
+  }
 
-setInterval(() => {
-  if (refreshing) refreshResultAndImage();
-}, REFRESH_MS);
+  // Refresh last analysis result
+  function refreshResult(){
+    fetch(`/api/last_result?pi_id=${PI_ID}`)
+      .then(r => r.json())
+      .then(j => {
+        if (j.result){
+          document.getElementById('result').innerText =
+            `Crop: ${j.result.crop_type} | Status: ${j.result.status} | Confidence: ${j.result.confidence}`;
+        }
+      })
+      .catch(()=>{});
+  }
 
+  // Combined periodic update
+  setInterval(() => {
+    refreshImage();
+    refreshResult();
+  }, REFRESH_MS);
 </script>
+
 </body>
 </html>
-
