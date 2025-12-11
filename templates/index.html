@@ -2,11 +2,11 @@
 <html>
 <head>
     <title>AGROD CONTROL</title>
-    <meta charset="utf-8">
+    <meta charset="utf-8" />
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
             background: #fafafa;
         }
         img {
@@ -23,12 +23,11 @@
             font-size: 18px;
             margin-top: 15px;
             padding: 10px;
-            background: #eee;
+            background: #EEE;
             width: 600px;
         }
     </style>
 </head>
-
 <body>
 
 <h1>AGROD Drone Dashboard</h1>
@@ -53,42 +52,49 @@
 <button onclick="sendCommand('CAPTURE')">Capture Image</button>
 
 <script>
-    const PI_ID = "{{ pi_id }}";
-    const REFRESH_MS = {{ refresh_interval }};
+const PI_ID = "{{ pi_id }}";
+const REFRESH_MS = {{ refresh_interval }};
 
-    function sendCommand(cmd) {
-        fetch("/api/set_command", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pi_id: PI_ID, command: cmd })
-        });
-    }
+// send commands
+function sendCommand(cmd){
+    fetch("/api/set_command", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({pi_id: PI_ID, command: cmd})
+    });
+}
 
-    function refreshImage() {
-        const url = `/last_image/${PI_ID}?ts=` + Date.now();
-        const img = new Image();
-        img.onload = () => {
-            document.getElementById("live").src = url;
-        };
-    }
+// Preload → Swap image only after loading (no flicker)
+function refreshImage(){
+    const url = `/last_image/${PI_ID}?ts=` + Date.now();
+    const img = new Image();
+    img.onload = () => {
+        document.getElementById("live").src = url;
+    };
+    img.onerror = () => {
+        console.log("Preview load failed");
+    };
+    img.src = url;
+}
 
-    function refreshResult() {
-        fetch(`/api/last_result?pi_id=${PI_ID}`)
-            .then(r => r.json())
-            .then(j => {
-                if (j.result) {
-                    document.getElementById("result").innerText =
-                        `Crop: ${j.result.crop_type} | Status: ${j.result.status} | Confidence: ${j.result.confidence}`;
-                }
-            });
-    }
+// Refresh analysis result
+function refreshResult(){
+    fetch(`/api/last_result?pi_id=${PI_ID}`)
+      .then(r => r.json())
+      .then(j => {
+          if (j.result){
+              document.getElementById("result").innerText =
+                  `Crop: ${j.result.crop_type} | Status: ${j.result.status} | Confidence: ${j.result.confidence}`;
+          }
+      });
+}
 
-    setInterval(() => {
-        refreshImage();
-        refreshResult();
-    }, REFRESH_MS);
+// Combined loop
+setInterval(() => {
+    refreshImage();
+    refreshResult();
+}, REFRESH_MS);
 </script>
 
 </body>
 </html>
-
