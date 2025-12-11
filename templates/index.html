@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AGROD CONTROL</title>
+    <meta charset="utf-8">
+    <script>
+        const PI_ID = "AGROD1";
+
+        function sendCommand(cmd){
+            fetch("/api/set_command", {
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({pi_id:PI_ID, command:cmd})
+            });
+        }
+    </script>
+</head>
+<body>
+    <h1>AGROD Drone Dashboard</h1>
+
+    <p>Command: <b>{{command}}</b></p>
+
+    <button onclick="sendCommand('PUMP_ON')">Pump ON</button>
+    <button onclick="sendCommand('PUMP_OFF')">Pump OFF</button>
+    <button onclick="sendCommand('CAPTURE')">Capture Image</button>
+
+    <h2>Last Result</h2>
+
+    {% if last_result %}
+        Crop: {{ last_result.crop_type }} <br>
+        Status: {{ last_result.status }} <br>
+        Confidence: {{ last_result.confidence }}
+    {% else %}
+        No data yet
+    {% endif %}
+</body>
+</html>
+
