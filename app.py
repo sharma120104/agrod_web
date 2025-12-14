@@ -1,15 +1,20 @@
 from flask import Flask, request, jsonify
 import cv2
 import numpy as np
+import os
 
 app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "AGROD Prediction API is running"
 
 @app.route("/predict", methods=["POST"])
 def predict():
     image_file = request.files.get("image")
     crop = request.form.get("crop")
 
-    # ---------- SAFETY NET ----------
+    # SAFETY RESPONSE (never break UI)
     if image_file is None or crop is None:
         return jsonify({
             "crop": crop if crop else "Unknown",
@@ -18,7 +23,6 @@ def predict():
             "suggestion": "Image or crop not received properly"
         })
 
-    # ---------- READ IMAGE ----------
     img_array = np.frombuffer(image_file.read(), np.uint8)
     image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
@@ -30,7 +34,7 @@ def predict():
             "suggestion": "Invalid image"
         })
 
-    image = cv2.resize(image, (224, 224))  # faster
+    image = cv2.resize(image, (224, 224))
 
     # ---------- COTTON ----------
     if crop == "cotton":
@@ -73,13 +77,17 @@ def predict():
             "suggestion": suggestion
         })
 
-    # ---------- FALLBACK ----------
     return jsonify({
         "crop": crop.capitalize(),
         "status": "Unknown",
         "confidence": "-",
         "suggestion": "Unsupported crop type"
     })
+
+# 🔴 THIS IS WHAT WAS MISSING
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 
 
