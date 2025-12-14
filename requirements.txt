@@ -1,3 +1,4 @@
-Flask
-gunicorn
-Pillow
+flask
+opencv-python
+numpy
+requests

@@ -1,143 +1,116 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>AGROD Drone Dashboard</title>
+    <title>AGROD – Smart Agriculture Dashboard</title>
     <style>
-        body{font-family:Arial, sans-serif;padding:18px;background:#fff}
-        #preview{border:2px solid #222; width:640px; height:360px; display:block; object-fit:contain; background:#f7f7f7}
-        #captured{border:1px solid #ccc; width:640px; height:360px; object-fit:contain; display:block; margin-bottom:12px}
-        #result{margin-top:10px; padding:8px; background:#efefef; width:640px}
-        button{padding:8px 14px;margin:6px}
+        body {
+            font-family: Arial;
+            background: #e8f5e9;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { color: #2e7d32; }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .card {
+            background: white;
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 18px;
+            background: #43a047;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #2e7d32; }
+        select {
+            padding: 8px;
+            border-radius: 6px;
+        }
+        img {
+            border-radius: 10px;
+            border: 2px solid #2e7d32;
+        }
+        #result {
+            background: #f1f8e9;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
     </style>
 </head>
+
 <body>
-  <h1>AGROD Drone Dashboard</h1>
-  <p><b>PI ID:</b> {{ pi_id }}</p>
+<h1>🌱 AGROD Smart Agriculture Dashboard</h1>
 
-  <h2>Captured (latest)</h2>
-  <img id="captured" src="/last_image/{{ pi_id }}" alt="captured image">
+<div class="container">
 
-  <h2>Near-live preview</h2>
-  <img id="preview" src="/last_image/{{ pi_id }}" alt="near-live preview">
+    <div class="card">
+        <h2>🎥 Live Camera Feed</h2>
+        <img src="http://{{ pi_ip }}:8000/video" width="100%">
+    </div>
 
-  <div id="result">
-    {% if last_result %}
-      Crop: {{ last_result.crop_type }} | Status: {{ last_result.status }} | Confidence: {{ last_result.confidence }}
-    {% else %}
-      No data yet
-    {% endif %}
-  </div>
+    <div class="card">
+        <h2>📸 Last Captured Image</h2>
+        <img id="captured" src="http://{{ pi_ip }}:8000/captured_image" width="100%">
+    </div>
 
-  <h3>Controls</h3>
-  <button onclick="sendCommand('PUMP_ON')">Pump ON</button>
-  <button onclick="sendCommand('PUMP_OFF')">Pump OFF</button>
-  <button onclick="sendCommand('CAPTURE')">Capture Image</button>
+    <div class="card">
+        <h2>🚜 Controls</h2>
+        <button onclick="controlPump('on')">Pump ON</button>
+        <button onclick="controlPump('off')">Pump OFF</button>
+        <br><br>
+        <label><b>Crop Type:</b></label>
+        <select id="crop">
+            <option value="cotton">Cotton</option>
+            <option value="coconut">Coconut</option>
+        </select>
+        <br><br>
+        <button onclick="captureAndPredict()">Capture & Predict</button>
+    </div>
+
+    <div class="card">
+        <h2>🧠 Prediction</h2>
+        <div id="result">No prediction yet</div>
+    </div>
+
+</div>
 
 <script>
-/* --------- Config from server template --------- */
-const PI_ID = "{{ pi_id }}";
-const REFRESH_MS = {{ refresh_interval }}; // ms (set by app.py); default 250-700
-/* ---------------------------------------------- */
-
-const previewEl = document.getElementById("preview");
-const capturedEl = document.getElementById("captured");
-const resultEl = document.getElementById("result");
-
-// track last known headers to detect change
-let lastContentLength = null;
-let lastModified = null;
-let lastUpdateDisplay = null;
-
-function sendCommand(cmd){
-  fetch("/api/set_command", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({pi_id: PI_ID, command: cmd})
-  }).catch(e => console.warn("sendCommand error", e));
+function controlPump(state) {
+    fetch(`/pump/${state}`);
 }
 
-// perform a HEAD request to inspect headers without downloading body
-async function headLastImage() {
-  try {
-    const url = `/last_image/${PI_ID}`;
-    const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-    if (!r.ok) return null;
-    return {
-      length: r.headers.get('Content-Length'),
-      modified: r.headers.get('Last-Modified'),
-      date: r.headers.get('Date'),
-      contentType: r.headers.get('Content-Type')
-    };
-  } catch (e) {
-    console.warn("HEAD failed:", e);
-    return null;
-  }
-}
+function captureAndPredict() {
+    const crop = document.getElementById("crop").value;
 
-// Preload image and swap only when loaded
-function preloadAndSwap(url) {
-  const img = new Image();
-  img.onload = () => {
-    previewEl.src = url;
-    // update the static captured view too
-    capturedEl.src = url;
-  };
-  img.onerror = () => {
-    console.warn("preview load error for", url);
-  };
-  img.src = url;
-}
-
-// refresh both headers and result
-async function refreshLoop() {
-  // 1) update result text (non-blocking)
-  fetch(`/api/last_result?pi_id=${PI_ID}`)
-    .then(r => r.json())
-    .then(j => {
-      if (j.result) {
-        resultEl.innerText = `Crop: ${j.result.crop_type} | Status: ${j.result.status} | Confidence: ${j.result.confidence}`;
-      }
+    fetch("/capture_and_predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ crop: crop })
     })
-    .catch(()=>{});
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById("captured").src =
+            "http://{{ pi_ip }}:8000/captured_image?" + new Date().getTime();
 
-  // 2) check HEAD to know if last_image changed
-  const h = await headLastImage();
-  if (!h) return;
-
-  // If server returns tiny placeholder it may be image/png with tiny length; ignore placeholder
-  if (h.contentType && h.contentType.includes('image/png') && Number(h.length) < 200) {
-    // placeholder present — do nothing yet
-    return;
-  }
-
-  // If first time or headers changed, fetch new image
-  const changed = (lastContentLength !== h.length) || (lastModified !== h.modified);
-  if (changed) {
-    lastContentLength = h.length;
-    lastModified = h.modified;
-    const imgUrl = `/last_image/${PI_ID}?ts=` + Date.now();
-    preloadAndSwap(imgUrl);
-
-    // show last update info on page
-    const when = h.modified || h.date || new Date().toString();
-    if (!lastUpdateDisplay) {
-      lastUpdateDisplay = document.createElement('div');
-      lastUpdateDisplay.style.marginTop = '6px';
-      lastUpdateDisplay.style.fontSize = '13px';
-      previewEl.parentNode.insertBefore(lastUpdateDisplay, previewEl.nextSibling);
-    }
-    lastUpdateDisplay.innerText = "Last image update: " + when;
-    console.log("Preview updated:", when, "len=", h.length, "type=", h.contentType);
-  }
+        document.getElementById("result").innerHTML = `
+            <b>Crop:</b> ${data.crop}<br>
+            <b>Status:</b> ${data.status}<br>
+            <b>Confidence:</b> ${data.confidence || "-"}<br>
+            <b>Suggestion:</b> ${data.suggestion}
+        `;
+    });
 }
-
-// run loop
-setInterval(refreshLoop, REFRESH_MS);
-// immediate initial run
-refreshLoop();
 </script>
 
 </body>
 </html>
-
