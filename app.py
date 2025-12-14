@@ -9,13 +9,28 @@ def predict():
     image_file = request.files.get("image")
     crop = request.form.get("crop")
 
+    # ---------- SAFETY NET ----------
     if image_file is None or crop is None:
-        return jsonify({"error": "Image or crop missing"}), 400
+        return jsonify({
+            "crop": crop if crop else "Unknown",
+            "status": "Error",
+            "confidence": "-",
+            "suggestion": "Image or crop not received properly"
+        })
 
-    # Decode image
+    # ---------- READ IMAGE ----------
     img_array = np.frombuffer(image_file.read(), np.uint8)
     image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-    image = cv2.resize(image, (256, 256))
+
+    if image is None:
+        return jsonify({
+            "crop": crop.capitalize(),
+            "status": "Error",
+            "confidence": "-",
+            "suggestion": "Invalid image"
+        })
+
+    image = cv2.resize(image, (224, 224))  # faster
 
     # ---------- COTTON ----------
     if crop == "cotton":
@@ -24,19 +39,18 @@ def predict():
         brown_ratio = brown_mask.mean()
 
         if brown_ratio > 5:
-            return jsonify({
-                "crop": "Cotton",
-                "status": "Diseased",
-                "confidence": "High",
-                "suggestion": "Use Neem oil or Imidacloprid pesticide"
-            })
+            status = "Diseased"
+            suggestion = "Use Neem oil or Imidacloprid pesticide"
         else:
-            return jsonify({
-                "crop": "Cotton",
-                "status": "Healthy",
-                "confidence": "High",
-                "suggestion": "No pesticide required"
-            })
+            status = "Healthy"
+            suggestion = "No pesticide required"
+
+        return jsonify({
+            "crop": "Cotton",
+            "status": status,
+            "confidence": "High",
+            "suggestion": suggestion
+        })
 
     # ---------- COCONUT ----------
     if crop == "coconut":
@@ -59,7 +73,13 @@ def predict():
             "suggestion": suggestion
         })
 
-    return jsonify({"error": "Invalid crop type"}), 400
+    # ---------- FALLBACK ----------
+    return jsonify({
+        "crop": crop.capitalize(),
+        "status": "Unknown",
+        "confidence": "-",
+        "suggestion": "Unsupported crop type"
+    })
 
 
 
